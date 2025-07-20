@@ -1,73 +1,64 @@
 pipeline {
     agent any
-
     tools {
-        maven 'Maven3' // Match this with Jenkins global config name
+        maven 'Maven3'
     }
-
     environment {
-        DOCKER_IMAGE = 'sirikaku/spring-petclinic:latest'
+        DOCKER_IMAGE = 'sirikaku/spring-petclinic'
     }
-
     stages {
+        stage('Checkout') {
+            steps {
+                git branch: 'main', url: 'https://github.com/siri666519/spring-petclinic.git'
+            }
+        }
+
         stage('Build Maven Project') {
             steps {
-                echo 'Building the project using Maven...'
-                sh 'mvn clean package -DskipTests'
+                dir('spring-petclinic') {
+                    sh 'mvn clean package -DskipTests'
+                }
             }
         }
 
         stage('Docker Build') {
             steps {
-                echo 'Building Docker image...'
-                sh 'docker build -t $DOCKER_IMAGE .'
+                dir('spring-petclinic') {
+                    sh 'docker build -t $DOCKER_IMAGE:latest .'
+                }
             }
         }
 
         stage('Push Docker Image to DockerHub') {
             steps {
-                echo 'Pushing image to DockerHub...'
-                withCredentials([usernamePassword(credentialsId: 'dockerhub-creds', usernameVariable: 'DOCKER_USER', passwordVariable: 'DOCKER_PASS')]) {
-                    sh 'echo $DOCKER_PASS | docker login -u $DOCKER_USER --password-stdin'
-                    sh 'docker push $DOCKER_IMAGE'
+                withCredentials([usernamePassword(credentialsId: 'dockerhub', usernameVariable: 'DOCKER_USERNAME', passwordVariable: 'DOCKER_PASSWORD')]) {
+                    sh '''
+                        echo "$DOCKER_PASSWORD" | docker login -u "$DOCKER_USERNAME" --password-stdin
+                        docker push $DOCKER_IMAGE:latest
+                    '''
                 }
             }
         }
 
         stage('Trivy Scan') {
             steps {
-                echo 'Running Trivy security scan...'
-                sh '''
-                    if ! command -v trivy &> /dev/null
-                    then
-                        echo "Installing Trivy..."
-                        curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /usr/local/bin
-                    fi
-                    trivy image $DOCKER_IMAGE > trivy-report.txt || true
-                '''
-                archiveArtifacts artifacts: 'trivy-report.txt', onlyIfSuccessful: false
+                sh "trivy image $DOCKER_IMAGE:latest > trivyimage.txt"
             }
         }
 
         stage('Deploy Container') {
             steps {
-                echo 'Deploying application to Kubernetes...'
-                sh '''
-                    kubectl apply -f k8s/deployment.yaml
-                    kubectl apply -f k8s/service.yaml
-                '''
+                sh 'docker rm -f petclinic4 || true'
+                sh 'docker run -d --name petclinic4 -p 8083:8080 $DOCKER_IMAGE:latest'
             }
         }
     }
 
     post {
         always {
-            echo 'Cleaning up Docker image (optional)...'
-            sh 'docker rmi $DOCKER_IMAGE || true'
-            archiveArtifacts artifacts: '**/target/*.jar', onlyIfSuccessful: true
-        }
-        failure {
-            echo 'Pipeline failed. Please check logs.'
+            echo 'Cleaning up...'
+            sh 'docker rmi $DOCKER_IMAGE:latest || true'
+            archiveArtifacts artifacts: 'trivyimage.txt', fingerprint: true
         }
     }
 }
