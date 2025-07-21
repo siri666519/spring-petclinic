@@ -1,48 +1,39 @@
 pipeline {
     agent any
 
-    tools {
-        maven 'Maven3'   // Matches Jenkins Maven tool name
+    environment {
+        DOCKER_IMAGE = "sirikaku/spring-petclinic:latest"
+        DOCKER_CREDENTIALS_ID = "dockerhub-creds" // 🔁 Replace this if your actual credentials ID is different
     }
 
     stages {
-        stage('Build Maven Project') {
+        stage('Checkout') {
             steps {
-                echo 'Building the project using Maven...'
-                sh 'mvn clean package -DskipTests'
+                git url: 'https://github.com/siri666519/spring-petclinic.git', branch: 'main'
+            }
+        }
+
+        stage('Build with Maven') {
+            steps {
+                sh 'mvn clean package'
             }
         }
 
         stage('Docker Build') {
             steps {
-                echo 'Building Docker image...'
-                sh 'docker build -t sirikaku/spring-petclinic:latest .'
-            }
-        }
-
-        stage('Push Docker Image to DockerHub') {
-            steps {
-                echo 'Pushing Docker image to DockerHub...'
-                withCredentials([usernamePassword(credentialsId: 'dockerhub-creds', usernameVariable: 'DOCKER_USER', passwordVariable: 'DOCKER_PASS')]) {
-                    sh '''
-                        echo "$DOCKER_PASS" | docker login -u "$DOCKER_USER" --password-stdin
-                        docker push sirikaku/spring-petclinic:latest
-                    '''
+                script {
+                    dockerImage = docker.build("${DOCKER_IMAGE}")
                 }
             }
         }
 
-        stage('Trivy Scan') {
+        stage('Docker Push') {
             steps {
-                echo 'Running Trivy security scan...'
-                sh 'trivy image sirikaku/spring-petclinic:latest || true'
-            }
-        }
-
-        stage('Deploy Container') {
-            steps {
-                echo 'Deploying application using kubectl...'
-                sh 'kubectl apply -f k8s/'
+                script {
+                    docker.withRegistry('https://index.docker.io/v1/', "${DOCKER_CREDENTIALS_ID}") {
+                        dockerImage.push()
+                    }
+                }
             }
         }
     }
@@ -50,10 +41,21 @@ pipeline {
     post {
         always {
             echo 'Cleaning up Docker image (optional)...'
-            sh 'docker rmi sirikaku/spring-petclinic:latest || true'
+            sh '''
+                if docker image inspect ${DOCKER_IMAGE} > /dev/null 2>&1; then
+                    docker rmi ${DOCKER_IMAGE}
+                else
+                    echo "Image not found, skipping cleanup."
+                fi
+            '''
         }
+
         failure {
             echo 'Pipeline failed. Please check logs.'
+        }
+
+        success {
+            echo 'Pipeline completed successfully.'
         }
     }
 }
