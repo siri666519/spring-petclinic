@@ -3,7 +3,7 @@ pipeline {
 
     environment {
         DOCKER_IMAGE = "sirikaku/spring-petclinic:latest"
-        DOCKER_CREDENTIALS_ID = "dockerhub-creds" // 🔁 Replace this if your actual credentials ID is different
+        DOCKER_CREDENTIALS_ID = "dockerhub-creds"
     }
 
     stages {
@@ -15,8 +15,7 @@ pipeline {
 
         stage('Build with Maven') {
             steps {
-                sh 'mvn clean package -DskipTests'
-
+                sh 'mvn clean package'
             }
         }
 
@@ -34,6 +33,15 @@ pipeline {
                     docker.withRegistry('https://index.docker.io/v1/', "${DOCKER_CREDENTIALS_ID}") {
                         dockerImage.push()
                     }
+                }
+            }
+        }
+
+        stage('Deploy to EKS') {
+            steps {
+                withCredentials([file(credentialsId: 'kubeconfig-file', variable: 'KUBECONFIG')]) {
+                    sh 'kubectl apply -f k8s/deployment.yaml -n petclinic'
+                    sh 'kubectl apply -f k8s/service.yaml -n petclinic'
                 }
             }
         }
