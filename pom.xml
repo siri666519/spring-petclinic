@@ -15,7 +15,7 @@
   <artifactId>spring-petclinic</artifactId>
   <version>0.0.1-SNAPSHOT</version>
   <name>spring-petclinic</name>
-  <description>Spring PetClinic Sample Application</description
+  <description>Spring PetClinic Sample Application</description>
 
   <properties>
     <java.version>17</java.version>
